@@ -1,14 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Environment variable validation
-function getRequiredEnvVar(name: string): string {
-  const value = process.env[name]
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`)
-  }
-  return value
-}
-
 function validateSupabaseUrl(url: string): string {
   try {
     const parsedUrl = new URL(url)
@@ -32,11 +23,29 @@ function validateSupabaseKey(key: string): string {
   return key
 }
 
-// Get and validate environment variables
-const supabaseUrl = validateSupabaseUrl(getRequiredEnvVar('NEXT_PUBLIC_SUPABASE_URL'))
-const supabaseAnonKey = validateSupabaseKey(getRequiredEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY'))
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Create Supabase client with error handling
+function createSupabaseClient() {
+  // For server-side rendering, use environment variables directly
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  
+  if (!url || !key) {
+    console.error('Supabase environment variables not found:', { url: !!url, key: !!key })
+    throw new Error('Missing Supabase environment variables. Ensure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set in .env.local')
+  }
+  
+  try {
+    const validatedUrl = validateSupabaseUrl(url)
+    const validatedKey = validateSupabaseKey(key)
+    return createClient(validatedUrl, validatedKey)
+  } catch (error) {
+    console.error('Supabase validation error:', error)
+    throw error
+  }
+}
+
+export const supabase = createSupabaseClient()
 
 // Updated types to match new schema
 export type Program = {
