@@ -1,19 +1,32 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { ProgramOption } from '@/lib/supabase'
 import { useWorkoutData } from '@/hooks/useWorkoutData'
 import { useProgramSelection } from '@/hooks/useProgramSelection'
+import { useExerciseCompletion } from '@/hooks/useExerciseCompletion'
+import { useWorkoutCompletion } from '@/hooks/useWorkoutCompletion'
 import AppLayout from '@/components/layout/AppLayout'
 import WeeklyCalendar from '@/components/ui/WeeklyCalendar'
 import ProgramSwitcher from '@/components/ui/ProgramSwitcher'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Circle, Clock, AlertCircle, RefreshCw } from 'lucide-react'
+import WeightRepsInput from '@/components/ui/WeightRepsInput'
+import { Clock, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react'
 
 export default function HomePage() {
   const { selectedProgram, selectedDate, handleProgramSelect, handleDateSelect } = useProgramSelection()
   const { programs, todayWorkout, loading, error, refetch } = useWorkoutData(selectedProgram, selectedDate)
+  const exerciseCompletion = useExerciseCompletion()
+  const workoutCompletion = useWorkoutCompletion()
+
+  // Load exercise logs when workout changes
+  useEffect(() => {
+    if (todayWorkout?.id) {
+      exerciseCompletion.loadExerciseLogsForDay(todayWorkout.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayWorkout?.id])
 
   // Get workout days for calendar (memoized for performance)
   const workoutDays = useMemo(() => {
@@ -77,6 +90,30 @@ export default function HomePage() {
   return (
     <AppLayout>
       <div className="space-y-6">
+        {/* Exercise Completion Error Display */}
+        {exerciseCompletion.error && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm">Exercise tracking error: {exerciseCompletion.error}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Workout Completion Error Display */}
+        {workoutCompletion.error && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm">Workout completion error: {workoutCompletion.error}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Header with Program Switcher and Calendar */}
         <div className="flex justify-between items-start space-x-4">
           <ProgramSwitcher
@@ -119,6 +156,7 @@ export default function HomePage() {
                 </Card>
               )}
 
+
               {/* Workout Sections */}
               {todayWorkout.workout_sections?.map((section) => (
                 <Card key={section.id}>
@@ -153,7 +191,7 @@ export default function HomePage() {
                   
                   <CardContent className="pt-0">
                     <div className="space-y-3">
-                      {section.workout_components?.map((component, componentIndex) => (
+                      {section.workout_components?.map((component) => (
                         <div key={component.id} className="space-y-1">
                           {/* Component header with type and notes */}
                           {(component.component_type !== 'single_exercise' || component.loading_note || component.progression_note) && (
@@ -192,13 +230,33 @@ export default function HomePage() {
                               <div key={exercise.id} className="border-l-4 border-blue-200 pl-4 py-2">
                                 <div className="flex items-start justify-between">
                                   <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <h4 className="font-medium text-gray-900">{exercise.name}</h4>
-                                      {component.exercises && component.exercises.length > 1 && (
-                                        <Badge variant="outline" className="text-xs">
-                                          {exerciseIndex + 1}
-                                        </Badge>
-                                      )}
+                                    <div className="flex items-center gap-3 mb-1">
+                                      <div className="flex items-center">
+                                        <input
+                                          type="checkbox"
+                                          id={`exercise-${exercise.id}`}
+                                          checked={exerciseCompletion.getExerciseLog(exercise.id)?.completed || false}
+                                          onChange={() => exerciseCompletion.toggleExerciseCompletion(exercise.id)}
+                                          disabled={exerciseCompletion.isLoading}
+                                          className="w-5 h-5 text-green-600 bg-gray-100 border-gray-300 rounded focus:ring-green-500 focus:ring-2 disabled:opacity-50"
+                                          aria-label={`Mark ${exercise.name} as complete`}
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-1">
+                                        <h4 className={`font-medium ${exerciseCompletion.getExerciseLog(exercise.id)?.completed ? 'text-green-700 line-through' : 'text-gray-900'}`}>
+                                          {exercise.name}
+                                        </h4>
+                                        {component.exercises && component.exercises.length > 1 && (
+                                          <Badge variant="outline" className="text-xs">
+                                            {exerciseIndex + 1}
+                                          </Badge>
+                                        )}
+                                        {exerciseCompletion.getExerciseLog(exercise.id)?.completed && (
+                                          <Badge variant="default" className="text-xs bg-green-500 text-white">
+                                            Complete
+                                          </Badge>
+                                        )}
+                                      </div>
                                     </div>
                                     
                                     {/* Exercise parameters */}
@@ -247,17 +305,21 @@ export default function HomePage() {
                                         <strong>Alternatives:</strong> {exercise.alternatives.join(', ')}
                                       </div>
                                     )}
+
+                                    {/* Weight and Reps Input */}
+                                    <WeightRepsInput
+                                      exerciseId={exercise.id}
+                                      exerciseName={exercise.name}
+                                      trackWeight={exercise.track_weight}
+                                      sectionType={section.section_type}
+                                      componentType={component.component_type}
+                                      exerciseLog={exerciseCompletion.getExerciseLog(exercise.id)}
+                                      onUpdate={exerciseCompletion.updateExerciseLog}
+                                      isLoading={exerciseCompletion.isLoading}
+                                      getPreviousExerciseLog={exerciseCompletion.getPreviousExerciseLog}
+                                    />
                                   </div>
                                   
-                                  {/* Weight logging placeholder */}
-                                  <div className="flex items-center space-x-2 ml-4">
-                                    <div className="text-xs text-gray-400">
-                                      Last: 135lbs × 8
-                                    </div>
-                                    <button className="p-1 hover:bg-gray-100 rounded">
-                                      <Circle size={20} className="text-gray-400" />
-                                    </button>
-                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -268,6 +330,34 @@ export default function HomePage() {
                   </CardContent>
                 </Card>
               ))}
+
+              {/* Complete Workout Button */}
+              <Card className="bg-green-50 border-green-200">
+                <CardContent className="pt-6">
+                  <div className="text-center">
+                    <CheckCircle2 className="w-12 h-12 text-green-600 mx-auto mb-3" />
+                    <h3 className="text-lg font-semibold text-green-800 mb-2">Complete Workout</h3>
+                    <p className="text-sm text-green-700 mb-4">
+                      Mark this entire workout as complete when you&apos;re done or need to finish early.
+                    </p>
+                    <button
+                      onClick={async () => {
+                        if (todayWorkout?.id) {
+                          await workoutCompletion.completeWorkout(todayWorkout.id)
+                          // Refresh exercise logs to show completed state
+                          if (!workoutCompletion.error) {
+                            await exerciseCompletion.loadExerciseLogsForDay(todayWorkout.id)
+                          }
+                        }
+                      }}
+                      disabled={workoutCompletion.isLoading}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {workoutCompletion.isLoading ? 'Completing...' : 'Complete Workout'}
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           ) : (
             <Card>

@@ -5,6 +5,10 @@ import { Upload, FileText, AlertCircle, CheckCircle, Calendar, Users, Activity }
 import { importWorkoutData, ImportResult, testDatabaseConnection, validateJsonStructure, JsonWorkoutData } from '@/lib/importWorkoutData';
 import { ValidationResult } from '@/lib/supabase';
 
+// File validation constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MIME_TYPES = ['application/json', 'text/json'];
+
 const AdminJsonImport = () => {
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -24,10 +28,6 @@ const AdminJsonImport = () => {
       setDragActive(false);
     }
   }, []);
-
-  // File validation constants
-  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-  const ALLOWED_MIME_TYPES = ['application/json', 'text/json'];
 
   // Process selected file
   const handleFileSelect = useCallback(async (selectedFile: File) => {

@@ -1,0 +1,122 @@
+[
+  {
+    "source_file": "sample_test_workout.json",
+    "week_info": {
+      "week_title": "Test Week 1",
+      "start_date": "2025-01-06",
+      "end_date": "2025-01-12"
+    },
+    "programs": {
+      "Test Program": {
+        "full_name": "Test Program",
+        "days": {
+          "Monday": {
+            "date": "2025-01-06",
+            "day_title": "Upper Body Test",
+            "coach_notes": "Focus on form and control",
+            "sections": [
+              {
+                "section_type": "Warm-up",
+                "duration": "10 minutes",
+                "components": [
+                  {
+                    "type": "single_exercise",
+                    "exercise": {
+                      "name": "Dynamic Arm Circles",
+                      "sets_reps": "2 × 10 each direction",
+                      "track_weight": false
+                    }
+                  }
+                ]
+              },
+              {
+                "section_type": "Main Work",
+                "section_letter": "A",
+                "duration": "25 minutes",
+                "components": [
+                  {
+                    "type": "superset",
+                    "rounds": 3,
+                    "exercises": [
+                      {
+                        "name": "Push-ups",
+                        "order": 1,
+                        "sets_reps": "3 × 8-12",
+                        "tempo": "3010",
+                        "rpe": "8",
+                        "track_weight": false,
+                        "alternatives": ["Incline Push-ups", "Knee Push-ups"]
+                      },
+                      {
+                        "name": "Pull-ups",
+                        "order": 2,
+                        "sets_reps": "3 × 5-8",
+                        "tempo": "3110",
+                        "rpe": "8",
+                        "rest_after": "90 seconds",
+                        "track_weight": true,
+                        "alternatives": ["Assisted Pull-ups", "Lat Pulldowns"]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "section_type": "Cool Down",
+                "duration": "5 minutes",
+                "components": [
+                  {
+                    "type": "single_exercise",
+                    "exercise": {
+                      "name": "Upper Body Stretch",
+                      "duration": "5 minutes",
+                      "track_weight": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "Wednesday": {
+            "date": "2025-01-08",
+            "day_title": "Lower Body Test",
+            "sections": [
+              {
+                "section_type": "Main Work",
+                "section_letter": "A",
+                "components": [
+                  {
+                    "type": "single_lift",
+                    "exercise": {
+                      "name": "Squats",
+                      "sets_reps": "4 × 6-8",
+                      "tempo": "3010",
+                      "rpe": "8",
+                      "track_weight": true,
+                      "sets_structure": [
+                        {
+                          "set_type": "warm_up",
+                          "set_number": 1,
+                          "reps": 5,
+                          "tempo": "3010",
+                          "rpe": "5"
+                        },
+                        {
+                          "set_type": "working",
+                          "set_range": "4",
+                          "reps": 8,
+                          "tempo": "3010",
+                          "rpe": "8"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+]

@@ -32,7 +32,6 @@ export function useWorkoutData(selectedProgram: string, selectedDate: Date) {
       
       if (!program) return
 
-      console.log('Fetching workout for:', { dayName, selectedDate, programId: program.id })
 
       // Fetch today's workout
       const { data: dayData, error: dayError } = await supabase
@@ -52,20 +51,10 @@ export function useWorkoutData(selectedProgram: string, selectedDate: Date) {
         .single()
 
       if (dayError) {
-        console.log('No workout found for:', { dayName, programId: program.id, error: dayError })
-        
-        // Debug: Let's see what days ARE available for this program
-        const { data: availableDays } = await supabase
-          .from('program_days')
-          .select('day_name, date')
-          .eq('program_id', program.id)
-        
-        console.log('Available days for this program:', availableDays)
         setTodayWorkout(null)
         return
       }
 
-      console.log('Found workout:', dayData)
       setTodayWorkout(dayData)
     } catch (error) {
       console.error('Error fetching today workout:', error)

@@ -60,10 +60,19 @@ export interface JsonWorkoutData {
                 rpe?: string;
                 duration?: string;
                 rest_after?: string;
+                track_weight?: boolean;
                 alternatives?: string[];
                 loading_note?: string;
                 progression_note?: string;
                 notes?: string;
+                sets_structure?: Array<{
+                  set_type?: string;
+                  set_number?: number;
+                  set_range?: string;
+                  reps?: number;
+                  tempo?: string;
+                  rpe?: string;
+                }>;
               }>;
             }>;
           }>;
@@ -158,7 +167,7 @@ export async function testDatabaseConnection(): Promise<ImportResult> {
   }
 }
 
-// Main import function
+// Main import function with database transaction support
 export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<ImportResult> {
   try {
     // Get the first (and typically only) week data
@@ -178,9 +187,16 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
     let totalComponents = 0;
     let totalExercises = 0;
 
-    // Process each program
-    for (const [programName, programData] of Object.entries(weekData.programs)) {
-      console.log(`Importing program: ${programName}`);
+    // Start a transaction by performing all operations in a single try-catch
+    // Note: Supabase doesn't support explicit transactions in the client,
+    // but we can implement rollback logic for failed imports
+    const createdProgramIds: string[] = [];
+    const createdDayIds: string[] = [];
+
+    try {
+      // Process each program
+      for (const [programName, programData] of Object.entries(weekData.programs)) {
+        console.log(`Importing program: ${programName}`);
       
       // 1. Insert or update program
       const programInsertData = {
@@ -219,11 +235,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
             hint: programError?.hint,
             data: programInsertData
           });
-          return {
-            success: false,
-            message: `Failed to update program: ${programName}`,
-            error: `${programError?.message || 'Unknown error'} - Code: ${programError?.code || 'N/A'}`
-          };
+          throw new Error(`Failed to update program: ${programName} - ${programError?.message || 'Unknown error'}`);
         }
         programRecord = data;
       } else {
@@ -243,13 +255,10 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
             hint: programError?.hint,
             data: programInsertData
           });
-          return {
-            success: false,
-            message: `Failed to insert program: ${programName}`,
-            error: `${programError?.message || 'Unknown error'} - Code: ${programError?.code || 'N/A'}`
-          };
+          throw new Error(`Failed to insert program: ${programName} - ${programError?.message || 'Unknown error'}`);
         }
         programRecord = data;
+        createdProgramIds.push(data.id);
       }
 
       totalPrograms++;
@@ -287,7 +296,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
           
           if (dayError) {
             console.error(`Error updating day ${dayName}:`, dayError);
-            continue;
+            throw new Error(`Failed to update day: ${dayName} - ${dayError?.message || 'Unknown error'}`);
           }
           dayRecord = data;
         } else {
@@ -300,9 +309,10 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
           
           if (dayError) {
             console.error(`Error inserting day ${dayName}:`, dayError);
-            continue;
+            throw new Error(`Failed to insert day: ${dayName} - ${dayError?.message || 'Unknown error'}`);
           }
           dayRecord = data;
+          createdDayIds.push(data.id);
         }
 
         totalDays++;
@@ -378,11 +388,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
             console.error(`Section error string:`, JSON.stringify(sectionError, null, 2));
             console.error(`Section data that failed:`, sectionInsertData);
             console.error(`Original section:`, section);
-            return {
-              success: false,
-              message: `Failed to insert section: ${section.section_type}`,
-              error: JSON.stringify(sectionError, null, 2)
-            };
+            throw new Error(`Failed to insert section: ${section.section_type} - ${sectionError?.message || 'Unknown error'}`);
           }
 
           totalSections++;
@@ -414,13 +420,13 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
 
               if (componentError) {
                 console.error(`Error inserting component:`, componentError);
-                continue;
+                throw new Error(`Failed to insert component: ${component.type} - ${componentError?.message || 'Unknown error'}`);
               }
 
               totalComponents++;
 
               // 6. Process exercises in this component
-              let exercisesToProcess = [];
+              const exercisesToProcess = [];
               
               // Handle single exercise (component.exercise)
               if (component.exercise) {
@@ -489,7 +495,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
                     hint: exerciseError?.hint,
                     data: exerciseInsertData
                   });
-                  continue;
+                  throw new Error(`Failed to insert exercise: ${exercise.name} - ${exerciseError?.message || 'Unknown error'}`);
                 }
 
                 console.log(`✅ Successfully inserted exercise:`, exerciseData);
@@ -503,17 +509,91 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
       }
     }
 
-    return {
-      success: true,
-      message: `Successfully imported ${totalPrograms} programs with ${totalDays} days, ${totalSections} sections, ${totalComponents} components, and ${totalExercises} exercises`,
-      stats: {
-        programs: totalPrograms,
-        days: totalDays,
-        sections: totalSections,
-        components: totalComponents,
-        exercises: totalExercises
+      // If we reach here, import was successful
+      return {
+        success: true,
+        message: `Successfully imported ${totalPrograms} programs with ${totalDays} days, ${totalSections} sections, ${totalComponents} components, and ${totalExercises} exercises`,
+        stats: {
+          programs: totalPrograms,
+          days: totalDays,
+          sections: totalSections,
+          components: totalComponents,
+          exercises: totalExercises
+        }
+      };
+
+    } catch (error) {
+      console.error('Import failed, attempting rollback:', error);
+      
+      // Rollback: Delete any created records in reverse order
+      try {
+        if (createdDayIds.length > 0) {
+          console.log(`Rolling back ${createdDayIds.length} created days`);
+          
+          // Get section IDs for these days
+          const { data: sectionsToDelete } = await supabase
+            .from('workout_sections')
+            .select('id')
+            .in('day_id', createdDayIds);
+
+          if (sectionsToDelete && sectionsToDelete.length > 0) {
+            const sectionIds = sectionsToDelete.map(s => s.id);
+            
+            // Get component IDs for these sections
+            const { data: componentsToDelete } = await supabase
+              .from('workout_components')
+              .select('id')
+              .in('section_id', sectionIds);
+
+            if (componentsToDelete && componentsToDelete.length > 0) {
+              const componentIds = componentsToDelete.map(c => c.id);
+              
+              // Delete exercises
+              await supabase
+                .from('exercises')
+                .delete()
+                .in('component_id', componentIds);
+            }
+
+            // Delete components
+            await supabase
+              .from('workout_components')
+              .delete()
+              .in('section_id', sectionIds);
+
+            // Delete sections
+            await supabase
+              .from('workout_sections')
+              .delete()
+              .in('day_id', createdDayIds);
+          }
+
+          // Delete days
+          await supabase
+            .from('program_days')
+            .delete()
+            .in('id', createdDayIds);
+        }
+
+        if (createdProgramIds.length > 0) {
+          console.log(`Rolling back ${createdProgramIds.length} created programs`);
+          await supabase
+            .from('programs')
+            .delete()
+            .in('id', createdProgramIds);
+        }
+
+        console.log('Rollback completed successfully');
+      } catch (rollbackError) {
+        console.error('Rollback failed:', rollbackError);
       }
-    };
+
+      return {
+        success: false,
+        message: 'Import failed and rollback completed',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
 
   } catch (error) {
     console.error('Import error:', error);

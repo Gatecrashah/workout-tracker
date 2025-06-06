@@ -41,10 +41,33 @@ The app models workout programs with a hierarchical structure:
 ### State Management
 - Uses React state with localStorage persistence
 - Selected program and date persist across sessions
-- Workout progress tracking per day (planned but not fully implemented)
+- Exercise completion and weight logging implemented with database persistence
 
 ### Import System
-The app includes a JSON import system (`src/lib/importWorkoutData.ts`) that can process structured workout data. The JSON format supports complex workout structures including supersets, circuits, and detailed set progressions for single lifts.
+The app includes a JSON import system (`src/lib/importWorkoutData.ts`) that can process structured workout data. The JSON format supports complex workout structures including supersets, circuits, and detailed set progressions for single lifts. The import handles:
+- Component-based exercise organization (single_exercise, superset, circuit, single_lift)
+- Exercise parameters (sets/reps, tempo, RPE, duration, rest periods)
+- Loading and progression notes at both component and exercise levels
+- Exercise alternatives and detailed formatting
 
 ### Database Schema
 Uses Supabase with tables: programs, program_days, workout_sections, workout_components, exercises, exercise_logs, workout_completions. Foreign key relationships maintain data integrity across the hierarchical structure.
+
+**Key Tables:**
+- `exercise_logs` - Tracks exercise completion, weight, reps, and notes
+- `workout_completions` - Records when full workout days are completed
+- `exercises` - Individual exercises with `track_weight` boolean for weight logging
+- `workout_components` - Groups exercises by type (superset, circuit, etc.)
+
+### Recent Updates
+- **JSON Import System**: Fixed to handle complex component structures with proper exercise extraction
+- **Database Schema**: Updated `format_total_sets` to text type to preserve range values ("2-3", "3-4")
+- **UI Enhancement**: Improved workout display with section duration, component types, exercise details, and notes
+- **Data Structure**: Supports the full hierarchy: sections → components → exercises with proper TypeScript types
+
+### Planned Features
+- **Exercise Completion Tracking**: Checkbox interface for marking exercises complete
+- **Weight Logging**: Input fields for tracking weights and reps on single lifts  
+- **Workout Progress**: Real-time progress indicators and completion statistics
+- **History Page**: Basic analytics and weight progression tracking
+- **Authentication**: Simple single-user login system
