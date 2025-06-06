@@ -19,13 +19,52 @@ export interface JsonWorkoutData {
           sections: Array<{
             section_type: string;
             section_letter?: string;
-            exercises: Array<{
-              name: string;
-              sets_reps?: string;
-              tempo?: string;
-              rpe?: string;
-              loading?: string;
-              notes?: string;
+            duration?: string;
+            format?: {
+              type?: string;
+              structure?: string;
+              interval_seconds?: number;
+              total_sets?: number;
+            };
+            components: Array<{
+              type: string;
+              rounds?: number;
+              transition?: string;
+              loading_note?: string;
+              progression_note?: string;
+              intention_note?: string;
+              exercise?: {
+                name: string;
+                sets_reps?: string;
+                tempo?: string;
+                rpe?: string;
+                duration?: string;
+                track_weight?: boolean;
+                alternatives?: string[];
+                loading_note?: string;
+                progression_note?: string;
+                sets_structure?: Array<{
+                  set_type?: string;
+                  set_number?: number;
+                  set_range?: string;
+                  reps?: number;
+                  tempo?: string;
+                  rpe?: string;
+                }>;
+              };
+              exercises?: Array<{
+                name: string;
+                order?: number;
+                sets_reps?: string;
+                tempo?: string;
+                rpe?: string;
+                duration?: string;
+                rest_after?: string;
+                alternatives?: string[];
+                loading_note?: string;
+                progression_note?: string;
+                notes?: string;
+              }>;
             }>;
           }>;
         };
@@ -268,62 +307,197 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
 
         totalDays++;
 
-        // 3. Delete existing sections for this day (to handle updates)
-        await supabase
+        // 3. Delete existing data for this day (to handle updates)
+        // First get the section IDs for this day
+        const { data: existingSections } = await supabase
           .from('workout_sections')
-          .delete()
+          .select('id')
           .eq('day_id', dayRecord.id);
+
+        if (existingSections && existingSections.length > 0) {
+          const sectionIds = existingSections.map(s => s.id);
+          
+          // Get component IDs for these sections
+          const { data: existingComponents } = await supabase
+            .from('workout_components')
+            .select('id')
+            .in('section_id', sectionIds);
+
+          if (existingComponents && existingComponents.length > 0) {
+            const componentIds = existingComponents.map(c => c.id);
+            
+            // Delete exercises first
+            await supabase
+              .from('exercises')
+              .delete()
+              .in('component_id', componentIds);
+          }
+
+          // Delete components
+          await supabase
+            .from('workout_components')
+            .delete()
+            .in('section_id', sectionIds);
+
+          // Delete sections
+          await supabase
+            .from('workout_sections')
+            .delete()
+            .eq('day_id', dayRecord.id);
+        }
 
         // 4. Process each section in the day
         for (let sectionIndex = 0; sectionIndex < dayData.sections.length; sectionIndex++) {
           const section = dayData.sections[sectionIndex];
           
+          // Prepare section data
+          const sectionInsertData = {
+            day_id: dayRecord.id,
+            section_type: section.section_type,
+            section_letter: section.section_letter || null,
+            order_index: sectionIndex,
+            duration: section.duration || null,
+            format_type: section.format?.type || null,
+            format_structure: section.format?.structure || null,
+            format_interval_seconds: section.format?.interval_seconds || null,
+            format_total_sets: section.format?.total_sets ? String(section.format.total_sets) : null
+          };
+
+          console.log(`About to insert section data:`, sectionInsertData);
+
           // Insert workout section
           const { data: sectionRecord, error: sectionError } = await supabase
             .from('workout_sections')
-            .insert({
-              day_id: dayRecord.id,
-              section_type: section.section_type,
-              section_letter: section.section_letter || null,
-              order_index: sectionIndex
-            })
+            .insert(sectionInsertData)
             .select()
             .single();
 
           if (sectionError) {
-            console.error(`Error inserting section:`, sectionError);
-            continue;
+            console.error(`ERROR inserting section:`, sectionError);
+            console.error(`Section error properties:`, Object.keys(sectionError));
+            console.error(`Section error string:`, JSON.stringify(sectionError, null, 2));
+            console.error(`Section data that failed:`, sectionInsertData);
+            console.error(`Original section:`, section);
+            return {
+              success: false,
+              message: `Failed to insert section: ${section.section_type}`,
+              error: JSON.stringify(sectionError, null, 2)
+            };
           }
 
           totalSections++;
-          totalComponents++; // Each section is also a component in the simplified schema
 
-          // 5. Process each exercise in the section
-          if (section.exercises && Array.isArray(section.exercises)) {
-            for (let exerciseIndex = 0; exerciseIndex < section.exercises.length; exerciseIndex++) {
-              const exercise = section.exercises[exerciseIndex];
+          // 5. Process each component in the section
+          console.log(`Processing section components:`, section.components);
+          if (section.components && Array.isArray(section.components)) {
+            console.log(`Found ${section.components.length} components in section ${section.section_type}`);
+            
+            for (let componentIndex = 0; componentIndex < section.components.length; componentIndex++) {
+              const component = section.components[componentIndex];
+              console.log(`Processing component ${componentIndex + 1}/${section.components.length}:`, component);
               
-              // Insert exercise
-              const { error: exerciseError } = await supabase
-                .from('exercises')
+              // Insert workout component
+              const { data: componentRecord, error: componentError } = await supabase
+                .from('workout_components')
                 .insert({
                   section_id: sectionRecord.id,
-                  name: exercise.name,
-                  sets_reps: exercise.sets_reps || null,
-                  tempo: exercise.tempo || null,
-                  rpe: exercise.rpe || null,
-                  loading: exercise.loading || null,
-                  notes: exercise.notes || null,
-                  order_index: exerciseIndex
-                });
+                  component_type: component.type,
+                  order_index: componentIndex,
+                  rounds: component.rounds || null,
+                  transition: component.transition || null,
+                  loading_note: component.loading_note || null,
+                  progression_note: component.progression_note || null,
+                  intention_note: component.intention_note || null
+                })
+                .select()
+                .single();
 
-              if (exerciseError) {
-                console.error(`Error inserting exercise ${exercise.name}:`, exerciseError);
+              if (componentError) {
+                console.error(`Error inserting component:`, componentError);
                 continue;
               }
 
-              totalExercises++;
+              totalComponents++;
+
+              // 6. Process exercises in this component
+              let exercisesToProcess = [];
+              
+              // Handle single exercise (component.exercise)
+              if (component.exercise) {
+                exercisesToProcess.push({
+                  ...component.exercise,
+                  order: 0
+                });
+              }
+              
+              // Handle multiple exercises (component.exercises)
+              if (component.exercises && Array.isArray(component.exercises)) {
+                exercisesToProcess.push(...component.exercises);
+              }
+
+              console.log(`Found ${exercisesToProcess.length} exercises in component`);
+              
+              for (let exerciseIndex = 0; exerciseIndex < exercisesToProcess.length; exerciseIndex++) {
+                const exercise = exercisesToProcess[exerciseIndex];
+                console.log(`Inserting exercise ${exerciseIndex + 1}/${exercisesToProcess.length}:`, exercise);
+                
+                // Handle sets_structure for single_lift type
+                let setsRepsValue = exercise.sets_reps;
+                if (exercise.sets_structure && Array.isArray(exercise.sets_structure)) {
+                  // For now, just use the working sets info
+                  const workingSets = exercise.sets_structure.filter(s => s.set_type === 'working');
+                  if (workingSets.length > 0) {
+                    const workingSet = workingSets[0];
+                    setsRepsValue = workingSet.set_range ? 
+                      `${workingSet.set_range} × ${workingSet.reps} @${workingSet.tempo || ''} RPE${workingSet.rpe || ''}` :
+                      `${workingSet.reps} reps @${workingSet.tempo || ''} RPE${workingSet.rpe || ''}`;
+                  }
+                }
+                
+                // Prepare exercise data
+                const exerciseInsertData = {
+                  component_id: componentRecord.id,
+                  name: exercise.name,
+                  order_index: exercise.order || exerciseIndex,
+                  sets_reps: setsRepsValue || null,
+                  tempo: exercise.tempo || null,
+                  rpe: exercise.rpe || null,
+                  duration: exercise.duration || null,
+                  rest_after: exercise.rest_after || null,
+                  track_weight: exercise.track_weight ?? true,
+                  alternatives: exercise.alternatives || null,
+                  loading_note: exercise.loading_note || null,
+                  progression_note: exercise.progression_note || null,
+                  notes: exercise.notes || null
+                };
+
+                console.log(`About to insert exercise data:`, exerciseInsertData);
+
+                // Insert exercise
+                const { data: exerciseData, error: exerciseError } = await supabase
+                  .from('exercises')
+                  .insert(exerciseInsertData)
+                  .select()
+                  .single();
+
+                if (exerciseError) {
+                  console.error(`ERROR inserting exercise ${exercise.name}:`, {
+                    error: exerciseError,
+                    code: exerciseError?.code,
+                    message: exerciseError?.message,
+                    details: exerciseError?.details,
+                    hint: exerciseError?.hint,
+                    data: exerciseInsertData
+                  });
+                  continue;
+                }
+
+                console.log(`✅ Successfully inserted exercise:`, exerciseData);
+                totalExercises++;
+              }
             }
+          } else {
+            console.log(`No components found in section ${section.section_type}:`, section);
           }
         }
       }
@@ -393,6 +567,13 @@ export async function clearAllWorkoutData(confirmationKey?: string): Promise<boo
       .gt('id', 0);
 
     if (exercisesError) throw exercisesError;
+
+    const { error: componentsError } = await supabase
+      .from('workout_components')
+      .delete()
+      .gt('id', 0);
+
+    if (componentsError) throw componentsError;
 
     const { error: sectionsError } = await supabase
       .from('workout_sections')
@@ -481,12 +662,25 @@ export function validateJsonStructure(data: unknown): ValidationResult {
           }
 
           totalSections += day.sections.length;
-          totalComponents += day.sections.length; // Each section is also a component
 
-          // Count exercises
+          // Count components and exercises
           for (const section of day.sections) {
-            if (section && typeof section === 'object' && 'exercises' in section && section.exercises && Array.isArray(section.exercises)) {
-              totalExercises += section.exercises.length;
+            if (section && typeof section === 'object' && 'components' in section && section.components && Array.isArray(section.components)) {
+              totalComponents += section.components.length;
+              
+              // Count exercises in each component
+              for (const component of section.components) {
+                if (component && typeof component === 'object') {
+                  // Count single exercise
+                  if (component.exercise) {
+                    totalExercises++;
+                  }
+                  // Count multiple exercises
+                  if (component.exercises && Array.isArray(component.exercises)) {
+                    totalExercises += component.exercises.length;
+                  }
+                }
+              }
             }
           }
         }

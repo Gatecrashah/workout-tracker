@@ -108,7 +108,13 @@ export default function HomePage() {
                     <CardTitle className="text-sm font-medium text-blue-700">Coach Notes</CardTitle>
                   </CardHeader>
                   <CardContent className="pt-0">
-                    <p className="text-sm text-gray-700">{todayWorkout.coach_notes}</p>
+                    <div className="text-sm text-gray-700">
+                      {todayWorkout.coach_notes.split('\n\n').map((paragraph, index) => (
+                        <p key={index} className={index > 0 ? 'mt-4' : ''}>
+                          {paragraph.replace(/\n/g, ' ')}
+                        </p>
+                      ))}
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -116,47 +122,145 @@ export default function HomePage() {
               {/* Workout Sections */}
               {todayWorkout.workout_sections?.map((section) => (
                 <Card key={section.id}>
-                  <CardHeader className="pb-3">
+                  <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">
-                        {section.section_letter && (
-                          <Badge variant="outline" className="mr-2">
-                            {section.section_letter}
-                          </Badge>
+                      <div>
+                        <CardTitle className="text-lg">
+                          {section.section_letter && (
+                            <Badge variant="outline" className="mr-2">
+                              {section.section_letter}
+                            </Badge>
+                          )}
+                          {section.section_type}
+                          {section.duration && (
+                            <span className="ml-2 text-base font-normal text-gray-600">⏱️ {section.duration}</span>
+                          )}
+                        </CardTitle>
+                        {(section.format_structure || section.format_total_sets) && (
+                          <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                            {section.format_structure && (
+                              <span>{section.format_structure}</span>
+                            )}
+                            {section.format_total_sets && (
+                              <span>{section.format_total_sets} sets</span>
+                            )}
+                          </div>
                         )}
-                        {section.section_type}
-                      </CardTitle>
+                      </div>
                       {/* Progress indicator could go here */}
                     </div>
                   </CardHeader>
                   
                   <CardContent className="pt-0">
                     <div className="space-y-3">
-                      {section.exercises?.map((exercise) => (
-                        <div key={exercise.id} className="border-l-4 border-blue-200 pl-4 py-2">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <h4 className="font-medium text-gray-900">{exercise.name}</h4>
-                              {exercise.sets_reps && (
-                                <p className="text-sm text-gray-600 mt-1">{exercise.sets_reps}</p>
-                              )}
-                              {exercise.tempo && (
-                                <p className="text-xs text-gray-500">Tempo: {exercise.tempo}</p>
-                              )}
-                              {exercise.rpe && (
-                                <p className="text-xs text-gray-500">RPE: {exercise.rpe}</p>
-                              )}
-                            </div>
-                            
-                            {/* Weight logging placeholder */}
-                            <div className="flex items-center space-x-2 ml-4">
-                              <div className="text-xs text-gray-400">
-                                Last: 135lbs × 8
+                      {section.workout_components?.map((component, componentIndex) => (
+                        <div key={component.id} className="space-y-1">
+                          {/* Component header with type and notes */}
+                          {(component.component_type !== 'single_exercise' || component.loading_note || component.progression_note) && (
+                            <div className="bg-gray-50 p-2 rounded-lg">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge variant="secondary" className="text-xs">
+                                  {component.component_type}
+                                </Badge>
+                                {component.rounds && (
+                                  <span className="text-xs text-gray-600">
+                                    {component.rounds} rounds
+                                  </span>
+                                )}
+                                {component.transition && (
+                                  <span className="text-xs text-gray-600">
+                                    → {component.transition}
+                                  </span>
+                                )}
                               </div>
-                              <button className="p-1 hover:bg-gray-100 rounded">
-                                <Circle size={20} className="text-gray-400" />
-                              </button>
+                              {component.loading_note && (
+                                <div className="text-xs text-gray-700 mb-1">
+                                  <strong>Loading Note:</strong> {component.loading_note}
+                                </div>
+                              )}
+                              {component.progression_note && (
+                                <div className="text-xs text-gray-700">
+                                  <strong>Progression Note:</strong> {component.progression_note}
+                                </div>
+                              )}
                             </div>
+                          )}
+
+                          {/* Exercises in this component */}
+                          <div className="space-y-1">
+                            {component.exercises?.map((exercise, exerciseIndex) => (
+                              <div key={exercise.id} className="border-l-4 border-blue-200 pl-4 py-2">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <h4 className="font-medium text-gray-900">{exercise.name}</h4>
+                                      {component.exercises && component.exercises.length > 1 && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {exerciseIndex + 1}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    
+                                    {/* Exercise parameters */}
+                                    <div className="grid grid-cols-2 gap-2 text-sm text-gray-600 mb-1">
+                                      {exercise.sets_reps && (
+                                        <div>{exercise.sets_reps}</div>
+                                      )}
+                                      {exercise.tempo && (
+                                        <div>Tempo: {exercise.tempo}</div>
+                                      )}
+                                      {exercise.rpe && (
+                                        <div>RPE: {exercise.rpe}</div>
+                                      )}
+                                      {exercise.duration && (
+                                        <div>{exercise.duration}</div>
+                                      )}
+                                      {exercise.rest_after && (
+                                        <div>Rest: {exercise.rest_after}</div>
+                                      )}
+                                    </div>
+
+                                    {/* Exercise notes */}
+                                    {(exercise.loading_note || exercise.progression_note || exercise.notes) && (
+                                      <div className="space-y-1">
+                                        {exercise.loading_note && (
+                                          <div className="text-xs text-gray-600">
+                                            <strong>Loading Note:</strong> {exercise.loading_note}
+                                          </div>
+                                        )}
+                                        {exercise.progression_note && (
+                                          <div className="text-xs text-gray-600">
+                                            <strong>Progression Note:</strong> {exercise.progression_note}
+                                          </div>
+                                        )}
+                                        {exercise.notes && (
+                                          <div className="text-xs text-gray-600">
+                                            <strong>Notes:</strong> {exercise.notes}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Alternatives */}
+                                    {exercise.alternatives && exercise.alternatives.length > 0 && (
+                                      <div className="text-xs text-gray-600 mt-1">
+                                        <strong>Alternatives:</strong> {exercise.alternatives.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Weight logging placeholder */}
+                                  <div className="flex items-center space-x-2 ml-4">
+                                    <div className="text-xs text-gray-400">
+                                      Last: 135lbs × 8
+                                    </div>
+                                    <button className="p-1 hover:bg-gray-100 rounded">
+                                      <Circle size={20} className="text-gray-400" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ))}

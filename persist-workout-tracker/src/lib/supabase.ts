@@ -78,7 +78,7 @@ export type WorkoutSection = {
   format_type: string | null
   format_structure: string | null
   format_interval_seconds: number | null
-  format_total_sets: number | null
+  format_total_sets: string | null
   created_at: string
 }
 
@@ -137,12 +137,16 @@ export type WorkoutCompletion = {
 }
 
 // Extended types for UI components
-export type WorkoutSectionWithExercises = WorkoutSection & {
+export type WorkoutComponentWithExercises = WorkoutComponent & {
   exercises: Exercise[]
 }
 
+export type WorkoutSectionWithComponents = WorkoutSection & {
+  workout_components: WorkoutComponentWithExercises[]
+}
+
 export type ProgramDayWithSections = ProgramDay & {
-  workout_sections: WorkoutSectionWithExercises[]
+  workout_sections: WorkoutSectionWithComponents[]
 }
 
 export type ProgramOption = {
