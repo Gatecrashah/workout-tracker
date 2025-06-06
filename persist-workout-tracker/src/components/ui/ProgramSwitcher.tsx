@@ -1,23 +1,36 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useMemo, useCallback, memo } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { ProgramOption } from '@/lib/supabase'
 
 interface ProgramSwitcherProps {
-  programs: Array<{ name: string; full_name: string }>
+  programs: ProgramOption[]
   selected: string
   onSelect: (programName: string) => void
 }
 
-export default function ProgramSwitcher({ programs, selected, onSelect }: ProgramSwitcherProps) {
+function ProgramSwitcher({ programs, selected, onSelect }: ProgramSwitcherProps) {
   const [isOpen, setIsOpen] = useState(false)
 
-  const selectedProgram = programs.find(p => p.name === selected)
+  const selectedProgram = useMemo(() => 
+    programs.find(p => p.name === selected), 
+    [programs, selected]
+  )
+
+  const handleToggle = useCallback(() => {
+    setIsOpen(prev => !prev)
+  }, [])
+
+  const handleSelect = useCallback((programName: string) => {
+    onSelect(programName)
+    setIsOpen(false)
+  }, [onSelect])
 
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className="flex items-center space-x-2 px-3 py-2 bg-white rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
       >
         <span className="font-medium text-sm">
@@ -31,10 +44,7 @@ export default function ProgramSwitcher({ programs, selected, onSelect }: Progra
           {programs.map((program) => (
             <button
               key={program.name}
-              onClick={() => {
-                onSelect(program.name)
-                setIsOpen(false)
-              }}
+              onClick={() => handleSelect(program.name)}
               className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors first:rounded-t-lg last:rounded-b-lg ${
                 program.name === selected ? 'bg-blue-50 text-blue-700 font-medium' : ''
               }`}
@@ -47,3 +57,6 @@ export default function ProgramSwitcher({ programs, selected, onSelect }: Progra
     </div>
   )
 }
+
+// Export memoized component to prevent unnecessary re-renders
+export default memo(ProgramSwitcher)

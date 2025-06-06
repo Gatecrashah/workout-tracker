@@ -1,7 +1,7 @@
 // src/lib/importWorkoutData.ts
-import { supabase } from './supabase';
+import { supabase, ValidationResult } from './supabase';
 
-interface JsonWorkoutData {
+export interface JsonWorkoutData {
   source_file: string;
   week_info?: {
     week_title: string;
@@ -41,6 +41,7 @@ export interface ImportResult {
     programs: number;
     days: number;
     sections: number;
+    components: number;
     exercises: number;
   };
   error?: string;
@@ -135,6 +136,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
     let totalPrograms = 0;
     let totalDays = 0;
     let totalSections = 0;
+    let totalComponents = 0;
     let totalExercises = 0;
 
     // Process each program
@@ -294,6 +296,7 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
           }
 
           totalSections++;
+          totalComponents++; // Each section is also a component in the simplified schema
 
           // 5. Process each exercise in the section
           if (section.exercises && Array.isArray(section.exercises)) {
@@ -328,11 +331,12 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
 
     return {
       success: true,
-      message: `Successfully imported ${totalPrograms} programs with ${totalDays} days, ${totalSections} sections, and ${totalExercises} exercises`,
+      message: `Successfully imported ${totalPrograms} programs with ${totalDays} days, ${totalSections} sections, ${totalComponents} components, and ${totalExercises} exercises`,
       stats: {
         programs: totalPrograms,
         days: totalDays,
         sections: totalSections,
+        components: totalComponents,
         exercises: totalExercises
       }
     };
@@ -347,20 +351,169 @@ export async function importWorkoutData(jsonData: JsonWorkoutData[]): Promise<Im
   }
 }
 
-// Clean up all workout data
-export async function clearAllWorkoutData(): Promise<boolean> {
+// Clean up all workout data (WARNING: This will delete ALL data)
+export async function clearAllWorkoutData(confirmationKey?: string): Promise<boolean> {
+  // Require explicit confirmation to prevent accidental data loss
+  if (confirmationKey !== 'CONFIRM_DELETE_ALL_DATA') {
+    throw new Error('Data deletion requires explicit confirmation key');
+  }
+
   try {
-    // Delete in reverse order of dependencies
-    await supabase.from('exercise_logs').delete().neq('id', 0);
-    await supabase.from('workout_completions').delete().neq('id', 0);
-    await supabase.from('exercises').delete().neq('id', 0);
-    await supabase.from('workout_sections').delete().neq('id', 0);
-    await supabase.from('program_days').delete().neq('id', 0);
-    await supabase.from('programs').delete().neq('id', 0);
-    
+    // Get count of records before deletion for safety check
+    const { count: programCount } = await supabase
+      .from('programs')
+      .select('*', { count: 'exact', head: true });
+
+    if (!programCount || programCount === 0) {
+      console.log('No data to delete');
+      return true;
+    }
+
+    console.warn(`About to delete ${programCount} programs and all related data`);
+
+    // Delete in reverse order of dependencies with explicit conditions
+    // Use gt 0 instead of neq to be more explicit about what we're deleting
+    const { error: exerciseLogsError } = await supabase
+      .from('exercise_logs')
+      .delete()
+      .gt('id', 0);
+
+    if (exerciseLogsError) throw exerciseLogsError;
+
+    const { error: completionsError } = await supabase
+      .from('workout_completions')
+      .delete()
+      .gt('id', 0);
+
+    if (completionsError) throw completionsError;
+
+    const { error: exercisesError } = await supabase
+      .from('exercises')
+      .delete()
+      .gt('id', 0);
+
+    if (exercisesError) throw exercisesError;
+
+    const { error: sectionsError } = await supabase
+      .from('workout_sections')
+      .delete()
+      .gt('id', 0);
+
+    if (sectionsError) throw sectionsError;
+
+    const { error: daysError } = await supabase
+      .from('program_days')
+      .delete()
+      .gt('id', 0);
+
+    if (daysError) throw daysError;
+
+    const { error: programsError } = await supabase
+      .from('programs')
+      .delete()
+      .gt('id', 0);
+
+    if (programsError) throw programsError;
+
+    console.log('Successfully cleared all workout data');
     return true;
   } catch (error) {
     console.error('Error clearing data:', error);
     return false;
   }
+}
+
+// Validation function
+export function validateJsonStructure(data: unknown): ValidationResult {
+  const results: ValidationResult = {
+    isValid: true,
+    errors: [],
+    warnings: [],
+    summary: {}
+  };
+
+  try {
+    // Check if it's an array with at least one object
+    if (!Array.isArray(data) || data.length === 0) {
+      results.errors.push('JSON must be an array with at least one object');
+      results.isValid = false;
+      return results;
+    }
+
+    const weekData = data[0];
+
+    // Check required top-level fields
+    const requiredFields = ['source_file', 'programs'];
+    for (const field of requiredFields) {
+      if (!weekData || typeof weekData !== 'object' || !(field in weekData)) {
+        results.errors.push(`Missing required field: ${field}`);
+        results.isValid = false;
+      }
+    }
+
+    // Validate programs structure
+    if (weekData && typeof weekData === 'object' && 'programs' in weekData && weekData.programs && typeof weekData.programs === 'object') {
+      const programNames = Object.keys(weekData.programs);
+      results.summary.totalPrograms = programNames.length;
+      results.summary.programNames = programNames;
+
+      let totalDays = 0;
+      let totalSections = 0;
+      let totalComponents = 0;
+      let totalExercises = 0;
+
+      // Check each program
+      for (const [programName, program] of Object.entries(weekData.programs)) {
+        if (!program || typeof program !== 'object' || !('days' in program) || !program.days || typeof program.days !== 'object') {
+          results.errors.push(`Program "${programName}" missing days object`);
+          results.isValid = false;
+          continue;
+        }
+
+        const days = Object.keys(program.days);
+        totalDays += days.length;
+
+        // Check each day
+        for (const [dayName, day] of Object.entries(program.days)) {
+          if (!day || typeof day !== 'object' || !('sections' in day) || !day.sections || !Array.isArray(day.sections)) {
+            results.warnings.push(`Day "${dayName}" in "${programName}" missing sections array`);
+            continue;
+          }
+
+          totalSections += day.sections.length;
+          totalComponents += day.sections.length; // Each section is also a component
+
+          // Count exercises
+          for (const section of day.sections) {
+            if (section && typeof section === 'object' && 'exercises' in section && section.exercises && Array.isArray(section.exercises)) {
+              totalExercises += section.exercises.length;
+            }
+          }
+        }
+      }
+
+      results.summary.totalDays = totalDays;
+      results.summary.totalSections = totalSections;
+      results.summary.totalComponents = totalComponents;
+      results.summary.totalExercises = totalExercises;
+    }
+
+    // Check week info
+    if (weekData && typeof weekData === 'object' && 'week_info' in weekData && weekData.week_info && typeof weekData.week_info === 'object') {
+      const weekInfo = weekData.week_info as Record<string, unknown>;
+      results.summary.weekInfo = {
+        title: typeof weekInfo.week_title === 'string' ? weekInfo.week_title : undefined,
+        startDate: typeof weekInfo.start_date === 'string' ? weekInfo.start_date : undefined,
+        endDate: typeof weekInfo.end_date === 'string' ? weekInfo.end_date : undefined
+      };
+    }
+
+    results.summary.sourceFile = weekData && typeof weekData === 'object' && 'source_file' in weekData ? (weekData.source_file as string) : undefined;
+
+  } catch (error) {
+    results.errors.push(`Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    results.isValid = false;
+  }
+
+  return results;
 }

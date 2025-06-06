@@ -1,115 +1,40 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase, Program, ProgramDay, WorkoutSection, Exercise } from '@/lib/supabase'
-import { storage } from '@/lib/storage'
+import { useMemo } from 'react'
+import { ProgramOption } from '@/lib/supabase'
+import { useWorkoutData } from '@/hooks/useWorkoutData'
+import { useProgramSelection } from '@/hooks/useProgramSelection'
 import AppLayout from '@/components/layout/AppLayout'
 import WeeklyCalendar from '@/components/ui/WeeklyCalendar'
 import ProgramSwitcher from '@/components/ui/ProgramSwitcher'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, Circle, Clock } from 'lucide-react'
+import { Circle, Clock, AlertCircle, RefreshCw } from 'lucide-react'
 
 export default function HomePage() {
-  const [programs, setPrograms] = useState<Program[]>([])
-  const [selectedProgram, setSelectedProgram] = useState<string>('PUMP LIFT')
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date())
-  const [todayWorkout, setTodayWorkout] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const { selectedProgram, selectedDate, handleProgramSelect, handleDateSelect } = useProgramSelection()
+  const { programs, todayWorkout, loading, error, refetch } = useWorkoutData(selectedProgram, selectedDate)
 
-  useEffect(() => {
-    initializeApp()
-  }, [])
-
-  useEffect(() => {
-    if (programs.length > 0) {
-      fetchTodayWorkout()
-      
-    }
-  }, [selectedProgram, selectedDate, programs])
-
-  async function initializeApp() {
-    // Restore saved state
-    const savedProgram = storage.getSelectedProgram()
-    const savedDate = storage.getSelectedDate()
-    
-    if (savedProgram) {
-      setSelectedProgram(savedProgram)
-    }
-    
-    if (savedDate) {
-      setSelectedDate(new Date(savedDate))
-    }
-
-    // Fetch programs
-    await fetchPrograms()
-  }
-
-  async function fetchPrograms() {
-    try {
-      const { data, error } = await supabase
-        .from('programs')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setPrograms(data || [])
-    } catch (error) {
-      console.error('Error fetching programs:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function fetchTodayWorkout() {
-    try {
-      const dayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' })
-      const program = programs.find(p => p.name === selectedProgram)
-      
-      if (!program) return
-
-      // Fetch today's workout
-      const { data: dayData, error: dayError } = await supabase
-        .from('program_days')
-        .select(`
-          *,
-          workout_sections (
-            *,
-            exercises (*)
-          )
-        `)
-        .eq('program_id', program.id)
-        .eq('day_name', dayName)
-        .single()
-
-      if (dayError) {
-        console.log('No workout for today:', dayError)
-        setTodayWorkout(null)
-        return
-      }
-
-      setTodayWorkout(dayData)
-    } catch (error) {
-      console.error('Error fetching today workout:', error)
-      setTodayWorkout(null)
-    }
-  }
-
-  const handleProgramSelect = (programName: string) => {
-    setSelectedProgram(programName)
-    storage.setSelectedProgram(programName)
-  }
-
-  const handleDateSelect = (date: Date) => {
-    setSelectedDate(date)
-    storage.setSelectedDate(date.toISOString())
-  }
-
-  // Get workout days for calendar
-  const getWorkoutDays = () => {
+  // Get workout days for calendar (memoized for performance)
+  const workoutDays = useMemo(() => {
     // This would be populated from your data
     return ['Monday', 'Tuesday', 'Wednesday', 'Friday'] // Example
-  }
+  }, [])
+
+  // Memoize program options for better performance
+  const programOptions: ProgramOption[] = useMemo(() => 
+    programs.map(p => ({ name: p.name, full_name: p.full_name })), 
+    [programs]
+  )
+
+  const todayStr = useMemo(() => 
+    selectedDate.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'long', 
+      day: 'numeric' 
+    }), 
+    [selectedDate]
+  )
 
   if (loading) {
     return (
@@ -123,12 +48,31 @@ export default function HomePage() {
     )
   }
 
-  const programOptions = programs.map(p => ({ name: p.name, full_name: p.full_name }))
-  const todayStr = selectedDate.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    month: 'long', 
-    day: 'numeric' 
-  })
+  if (error) {
+    return (
+      <AppLayout>
+        <div className="min-h-[400px] flex items-center justify-center">
+          <div className="text-center space-y-4 max-w-md">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold text-gray-900">Unable to Load Data</h2>
+              <p className="text-gray-600">{error}</p>
+            </div>
+            <button
+              onClick={refetch}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Try Again
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    )
+  }
+
 
   return (
     <AppLayout>
@@ -144,14 +88,14 @@ export default function HomePage() {
           <WeeklyCalendar
             selectedDate={selectedDate}
             onDateSelect={handleDateSelect}
-            workoutDays={getWorkoutDays()}
+            workoutDays={workoutDays}
           />
         </div>
 
         {/* Today's Workout */}
         <div className="space-y-4">
           <h1 className="text-2xl font-bold text-gray-900">
-            Today's Workout
+            Today&apos;s Workout
           </h1>
           <p className="text-gray-600">{todayStr}</p>
 
@@ -170,7 +114,7 @@ export default function HomePage() {
               )}
 
               {/* Workout Sections */}
-              {todayWorkout.workout_sections?.map((section: any, index: number) => (
+              {todayWorkout.workout_sections?.map((section) => (
                 <Card key={section.id}>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -188,7 +132,7 @@ export default function HomePage() {
                   
                   <CardContent className="pt-0">
                     <div className="space-y-3">
-                      {section.exercises?.map((exercise: any) => (
+                      {section.exercises?.map((exercise) => (
                         <div key={exercise.id} className="border-l-4 border-blue-200 pl-4 py-2">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">

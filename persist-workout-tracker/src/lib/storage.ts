@@ -37,7 +37,7 @@ export const storage = {
     return {}
   },
   
-  setWorkoutProgress: (dayId: string, progress: any) => {
+  setWorkoutProgress: (dayId: string, progress: Record<string, unknown>) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(`workout_${dayId}`, JSON.stringify(progress))
     }

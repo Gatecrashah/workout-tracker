@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, memo } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface WeeklyCalendarProps {
@@ -9,14 +9,10 @@ interface WeeklyCalendarProps {
   workoutDays?: string[] // ['Monday', 'Tuesday', 'Friday']
 }
 
-export default function WeeklyCalendar({ selectedDate, onDateSelect, workoutDays = [] }: WeeklyCalendarProps) {
+function WeeklyCalendar({ selectedDate, onDateSelect, workoutDays = [] }: WeeklyCalendarProps) {
   const [currentWeek, setCurrentWeek] = useState<Date[]>([])
 
-  useEffect(() => {
-    generateWeek(selectedDate)
-  }, [selectedDate])
-
-  const generateWeek = (centerDate: Date) => {
+  const generateWeek = useCallback((centerDate: Date) => {
     const week = []
     const startOfWeek = new Date(centerDate)
     const day = startOfWeek.getDay()
@@ -30,32 +26,46 @@ export default function WeeklyCalendar({ selectedDate, onDateSelect, workoutDays
     }
     
     setCurrentWeek(week)
-  }
+  }, [])
 
-  const isToday = (date: Date) => {
+  useEffect(() => {
+    generateWeek(selectedDate)
+  }, [selectedDate, generateWeek])
+
+  // Memoize these functions to avoid recreating them on every render
+  const isToday = useCallback((date: Date) => {
     const today = new Date()
     return date.toDateString() === today.toDateString()
-  }
+  }, [])
 
-  const isSelected = (date: Date) => {
+  const isSelected = useCallback((date: Date) => {
     return date.toDateString() === selectedDate.toDateString()
-  }
+  }, [selectedDate])
 
-  const hasWorkout = (date: Date) => {
+  const hasWorkout = useCallback((date: Date) => {
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
     return workoutDays.includes(dayName)
-  }
+  }, [workoutDays])
 
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  // Memoize static data
+  const dayNames = useMemo(() => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], [])
+
+  const handlePrevWeek = useCallback(() => {
+    const prevWeek = new Date(currentWeek[0])
+    prevWeek.setDate(prevWeek.getDate() - 7)
+    generateWeek(prevWeek)
+  }, [currentWeek, generateWeek])
+
+  const handleNextWeek = useCallback(() => {
+    const nextWeek = new Date(currentWeek[6])
+    nextWeek.setDate(nextWeek.getDate() + 1)
+    generateWeek(nextWeek)
+  }, [currentWeek, generateWeek])
 
   return (
     <div className="flex items-center space-x-2 bg-white rounded-lg p-2 shadow-sm">
       <button
-        onClick={() => {
-          const prevWeek = new Date(currentWeek[0])
-          prevWeek.setDate(prevWeek.getDate() - 7)
-          generateWeek(prevWeek)
-        }}
+        onClick={handlePrevWeek}
         className="p-1 hover:bg-gray-100 rounded"
       >
         <ChevronLeft size={16} />
@@ -86,11 +96,7 @@ export default function WeeklyCalendar({ selectedDate, onDateSelect, workoutDays
       </div>
 
       <button
-        onClick={() => {
-          const nextWeek = new Date(currentWeek[6])
-          nextWeek.setDate(nextWeek.getDate() + 1)
-          generateWeek(nextWeek)
-        }}
+        onClick={handleNextWeek}
         className="p-1 hover:bg-gray-100 rounded"
       >
         <ChevronRight size={16} />
@@ -98,3 +104,6 @@ export default function WeeklyCalendar({ selectedDate, onDateSelect, workoutDays
     </div>
   )
 }
+
+// Export memoized component to prevent unnecessary re-renders
+export default memo(WeeklyCalendar)

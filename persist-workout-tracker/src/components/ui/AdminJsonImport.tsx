@@ -2,18 +2,20 @@
 
 import React, { useState, useCallback } from 'react';
 import { Upload, FileText, AlertCircle, CheckCircle, Calendar, Users, Activity } from 'lucide-react';
-import { importWorkoutData, ImportResult, testDatabaseConnection } from '@/lib/importWorkoutData';
+import { importWorkoutData, ImportResult, testDatabaseConnection, validateJsonStructure, JsonWorkoutData } from '@/lib/importWorkoutData';
+import { ValidationResult } from '@/lib/supabase';
 
 const AdminJsonImport = () => {
   const [dragActive, setDragActive] = useState(false);
-  const [file, setFile] = useState(null);
-  const [jsonData, setJsonData] = useState(null);
-  const [importStatus, setImportStatus] = useState('idle'); // idle, validating, importing, success, error
-  const [validationResults, setValidationResults] = useState(null);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [jsonData, setJsonData] = useState<unknown>(null);
+  const [importStatus, setImportStatus] = useState<'idle' | 'validating' | 'importing' | 'success' | 'error'>('idle');
+  const [validationResults, setValidationResults] = useState<ValidationResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [successMessage, setSuccessMessage] = useState<string>('');
 
   // Handle drag events
-  const handleDrag = useCallback((e) => {
+  const handleDrag = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (e.type === "dragenter" || e.type === "dragover") {
@@ -23,29 +25,33 @@ const AdminJsonImport = () => {
     }
   }, []);
 
-  // Handle file drop
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    const files = e.dataTransfer.files;
-    if (files && files[0]) {
-      handleFileSelect(files[0]);
-    }
-  }, []);
-
-  // Handle file input change
-  const handleFileInputChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
-    }
-  };
+  // File validation constants
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const ALLOWED_MIME_TYPES = ['application/json', 'text/json'];
 
   // Process selected file
-  const handleFileSelect = async (selectedFile) => {
+  const handleFileSelect = useCallback(async (selectedFile: File) => {
+    // Validate file extension
     if (!selectedFile.name.endsWith('.json')) {
       setErrorMessage('Please select a JSON file');
+      return;
+    }
+
+    // Validate file size
+    if (selectedFile.size > MAX_FILE_SIZE) {
+      setErrorMessage(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+      return;
+    }
+
+    // Validate file type
+    if (!ALLOWED_MIME_TYPES.includes(selectedFile.type) && selectedFile.type !== '') {
+      setErrorMessage('Invalid file type. Please select a valid JSON file');
+      return;
+    }
+
+    // Additional security check: ensure file is not empty
+    if (selectedFile.size === 0) {
+      setErrorMessage('File is empty. Please select a file with content');
       return;
     }
 
@@ -55,9 +61,47 @@ const AdminJsonImport = () => {
 
     try {
       const text = await selectedFile.text();
-      const data = JSON.parse(text);
       
-      // Validate JSON structure
+      // Additional security check: limit JSON text size
+      if (text.length > 1024 * 1024) { // 1MB text limit
+        setErrorMessage('JSON content too large. Please use a smaller file');
+        setImportStatus('error');
+        return;
+      }
+
+      // Check for potentially malicious content patterns
+      const suspiciousPatterns = [
+        /\b(eval|function|constructor)\s*\(/i,
+        /<script\b/i,
+        /javascript:/i,
+        /data:.*base64/i
+      ];
+
+      for (const pattern of suspiciousPatterns) {
+        if (pattern.test(text)) {
+          setErrorMessage('File contains potentially unsafe content');
+          setImportStatus('error');
+          return;
+        }
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        setErrorMessage('Invalid JSON format. Please check your file syntax');
+        setImportStatus('error');
+        return;
+      }
+
+      // Validate that parsed data is reasonable in size
+      if (JSON.stringify(data).length > 5 * 1024 * 1024) { // 5MB object limit
+        setErrorMessage('Parsed JSON data too large for processing');
+        setImportStatus('error');
+        return;
+      }
+      
+      // Use the updated validation function from importWorkoutData
       const validation = validateJsonStructure(data);
       setValidationResults(validation);
       setJsonData(data);
@@ -70,95 +114,27 @@ const AdminJsonImport = () => {
       }
     } catch (error) {
       setImportStatus('error');
-      setErrorMessage(`Failed to parse JSON: ${error.message}`);
+      setErrorMessage(`Failed to process file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  };
+  }, []);
 
-  // Validate JSON structure against expected format
-  const validateJsonStructure = (data) => {
-    const results = {
-      isValid: true,
-      errors: [],
-      warnings: [],
-      summary: {}
-    };
-
-    try {
-      // Check if it's an array with at least one object
-      if (!Array.isArray(data) || data.length === 0) {
-        results.errors.push('JSON must be an array with at least one object');
-        results.isValid = false;
-        return results;
-      }
-
-      const weekData = data[0];
-
-      // Check required top-level fields
-      const requiredFields = ['source_file', 'programs'];
-      for (const field of requiredFields) {
-        if (!weekData[field]) {
-          results.errors.push(`Missing required field: ${field}`);
-          results.isValid = false;
-        }
-      }
-
-      // Validate programs structure
-      if (weekData.programs && typeof weekData.programs === 'object') {
-        const programNames = Object.keys(weekData.programs);
-        results.summary.totalPrograms = programNames.length;
-        results.summary.programNames = programNames;
-
-        let totalDays = 0;
-        let totalExercises = 0;
-
-        // Check each program
-        for (const [programName, program] of Object.entries(weekData.programs)) {
-          if (!program.days || typeof program.days !== 'object') {
-            results.errors.push(`Program "${programName}" missing days object`);
-            results.isValid = false;
-            continue;
-          }
-
-          const days = Object.keys(program.days);
-          totalDays += days.length;
-
-          // Check each day
-          for (const [dayName, day] of Object.entries(program.days)) {
-            if (!day.sections || !Array.isArray(day.sections)) {
-              results.warnings.push(`Day "${dayName}" in "${programName}" missing sections array`);
-              continue;
-            }
-
-            // Count exercises
-            for (const section of day.sections) {
-              if (section.exercises && Array.isArray(section.exercises)) {
-                totalExercises += section.exercises.length;
-              }
-            }
-          }
-        }
-
-        results.summary.totalDays = totalDays;
-        results.summary.totalExercises = totalExercises;
-      }
-
-      // Check week info
-      if (weekData.week_info) {
-        results.summary.weekInfo = {
-          title: weekData.week_info.week_title,
-          startDate: weekData.week_info.start_date,
-          endDate: weekData.week_info.end_date
-        };
-      }
-
-      results.summary.sourceFile = weekData.source_file;
-
-    } catch (error) {
-      results.errors.push(`Validation error: ${error.message}`);
-      results.isValid = false;
+  // Handle file drop
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    const files = e.dataTransfer.files;
+    if (files && files[0]) {
+      handleFileSelect(files[0]);
     }
+  }, [handleFileSelect]);
 
-    return results;
+  // Handle file input change
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileSelect(e.target.files[0]);
+    }
   };
 
   // Test database connection
@@ -171,7 +147,8 @@ const AdminJsonImport = () => {
       
       if (result.success) {
         setImportStatus('idle');
-        alert(result.message);
+        setSuccessMessage(result.message);
+        setErrorMessage('');
       } else {
         setImportStatus('error');
         setErrorMessage(result.error || result.message);
@@ -184,12 +161,12 @@ const AdminJsonImport = () => {
 
   // Handle import to database
   const handleImport = async () => {
-    if (!jsonData || !validationResults.isValid) return;
+    if (!jsonData || !validationResults?.isValid) return;
 
     setImportStatus('importing');
     
     try {
-      const result: ImportResult = await importWorkoutData(jsonData);
+      const result: ImportResult = await importWorkoutData(jsonData as JsonWorkoutData[]);
       
       if (result.success) {
         setImportStatus('success');
@@ -220,6 +197,7 @@ const AdminJsonImport = () => {
     setImportStatus('idle');
     setValidationResults(null);
     setErrorMessage('');
+    setSuccessMessage('');
     setDragActive(false);
   };
 
@@ -313,7 +291,7 @@ const AdminJsonImport = () => {
                       <h3 className="font-medium text-green-800 mb-2">
                         JSON Validation Passed
                       </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                         <div className="flex items-center">
                           <Users className="w-4 h-4 text-green-600 mr-1" />
                           <span className="text-green-700">
@@ -329,15 +307,25 @@ const AdminJsonImport = () => {
                         <div className="flex items-center">
                           <Activity className="w-4 h-4 text-green-600 mr-1" />
                           <span className="text-green-700">
-                            {validationResults.summary.totalExercises} Exercises
+                            {validationResults.summary.totalSections} Sections
                           </span>
                         </div>
                         <div className="flex items-center">
-                          <FileText className="w-4 h-4 text-green-600 mr-1" />
+                          <Activity className="w-4 h-4 text-green-600 mr-1" />
                           <span className="text-green-700">
-                            {validationResults.summary.sourceFile}
+                            {validationResults.summary.totalComponents} Components
                           </span>
                         </div>
+                        <div className="flex items-center">
+                          <Activity className="w-4 h-4 text-green-600 mr-1" />
+                          <span className="text-green-700">
+                            {validationResults.summary.totalExercises} Exercises
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm">
+                        <span className="text-gray-500">Source:</span>
+                        <span className="text-gray-900 ml-1">{validationResults.summary.sourceFile}</span>
                       </div>
                     </div>
                   </div>
@@ -419,6 +407,19 @@ const AdminJsonImport = () => {
             </div>
           )}
 
+          {/* Success Message */}
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <CheckCircle className="w-5 h-5 text-green-500 mr-2 mt-0.5" />
+                <div>
+                  <h4 className="font-medium text-green-800 mb-1">Success</h4>
+                  <p className="text-sm text-green-700">{successMessage}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Error Message */}
           {errorMessage && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -473,6 +474,7 @@ const AdminJsonImport = () => {
                       Imported: {validationResults.summary.importStats.programs} programs, {' '}
                       {validationResults.summary.importStats.days} days, {' '}
                       {validationResults.summary.importStats.sections} sections, {' '}
+                      {validationResults.summary.importStats.components} components, {' '}
                       {validationResults.summary.importStats.exercises} exercises
                     </div>
                   )}
